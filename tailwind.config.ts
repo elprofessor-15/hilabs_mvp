@@ -9,8 +9,16 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        background: "var(--page-bg)",
+        foreground: "var(--text-primary)",
+        brand: { DEFAULT: "#2A6AF1", hover: "#2563EB", pressed: "#0F4CD3" },
+        navy: { DEFAULT: "#0E254B", deep: "#031335" },
+        slate: "#5A6884",
+        border: "#DADDE2",
+        danger: "#DC2626",
+        warning: "#EC700A",
+        info: "#1BBCE4",
+        violet: "#7034EA",
       },
     },
   },
