@@ -1,10 +1,10 @@
-import { AlertCircle, CheckCircle2, Clock3, Info, ShieldAlert, Sparkles } from "lucide-react";
-import { ConfidenceBadge, FreshnessBadge, PageHeader, PriorityBadge, ProvenanceChip } from "@/components/ui";
+import { AlertCircle, CheckCircle2, Clock3, Info, ShieldAlert } from "lucide-react";
+import { ConfidenceBadge, FreshnessBadge, PageHeader, PriorityBadge, ProvenanceChip, RecordDraftBadge } from "@/components/ui";
 
 const tokens = [
   ["Royal blue", "#2A6AF1"], ["Midnight blue", "#0E254B"], ["Dark slate blue", "#2647A4"],
   ["Page background", "#F3F4F7"], ["Soft blue", "#ECF2FE"], ["Lavender", "#D3E1FC"],
-  ["Critical", "#DC2626"], ["Warning", "#A64B00"], ["Info", "#075E76"], ["AI", "#7034EA"],
+  ["Critical", "#DC2626"], ["Warning", "#A64B00"], ["Info", "#075E76"], ["Draft accent", "#7034EA"],
 ];
 
 export default function ComponentGalleryPage() {
@@ -25,7 +25,7 @@ export default function ComponentGalleryPage() {
         <h2 className="section-title">Confidence and provenance</h2>
         <div className="page-actions section-spacer"><ConfidenceBadge score={82} reasons={["One source is current.", "No quality flags in this example."]} /><ConfidenceBadge score={32} reasons={["Phone ownership is unverified.", "Claims feed is delayed."]} /></div>
         <div className="section-spacer"><ProvenanceChip source="Hospital ADT" eventDate="2026-11-07" receivedDate="2026-11-08" datasetId="adt" qualityFlags={["Diagnosis detail missing"]} /></div>
-        <div className="notice notice-ai section-spacer"><Sparkles size={14} /><span>AI-drafted content uses a violet label and border. Confirmation is required before save.</span></div>
+        <div className="notice notice-draft section-spacer"><RecordDraftBadge /><span>Record-derived content shows its sources and requires nurse confirmation before save.</span></div>
       </section>
     </div>
     <section className="card section-spacer">

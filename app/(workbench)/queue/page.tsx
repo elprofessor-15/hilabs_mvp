@@ -1,12 +1,12 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowDownWideNarrow, ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, Clock3, Filter, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Timer, X } from "lucide-react";
+import { AlertTriangle, ArrowDownWideNarrow, ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, Clock3, Filter, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Timer, X } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { HERO_CASES } from "@/data/seed";
 import { BACKGROUND_CASES } from "@/data/seed";
-import { getActionRule, scorePriority } from "@/lib/engines";
+import { deriveCaseFacts, getActionRule, getQueueMetrics, scorePriority } from "@/lib/engines";
 import { useWorkbenchStore } from "@/lib/store";
 import type { PriorityBand, QueueCase } from "@/lib/types";
 import { ConfidenceBadge, EmptyState, PageHeader, PriorityBadge } from "@/components/ui";
@@ -26,6 +26,7 @@ export default function QueuePage() {
   const [customView, setCustomView] = useState<{ query: string; priority: string; program: string; trigger: string; deadline: string; unreachable: boolean } | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>("P1");
   const [overrideCase, setOverrideCase] = useState<QueueCase | null>(null);
+  const [detailCase, setDetailCase] = useState<QueueCase | null>(null);
   const [overrideReason, setOverrideReason] = useState(REASONS[0]);
   const [overrideBand, setOverrideBand] = useState<PriorityBand>("High");
   const [overrideNote, setOverrideNote] = useState("");
@@ -35,27 +36,35 @@ export default function QueuePage() {
   const setPriorityOverride = useWorkbenchStore((state) => state.setPriorityOverride);
 
   const programs = useMemo(() => Array.from(new Set(CASES.map((member) => member.program))).sort(), []);
+  const caseAssessments = useMemo(() => new Map(CASES.map((member) => [member.id, {
+    priority: scorePriority(member),
+    facts: deriveCaseFacts(member),
+  }])), []);
+  const metrics = useMemo(() => getQueueMetrics(CASES), []);
   const filteredCases = useMemo(() => {
     const filtered = CASES.filter((member) => {
-      const priority = scorePriority(member.priorityFactors, "protocolTrigger" in member ? member.protocolTrigger : undefined, member.primaryActionId);
+      const { priority, facts } = caseAssessments.get(member.id)!;
       const matchesQuery = `${member.name} ${member.id} ${member.program} ${member.primaryCondition}`.toLowerCase().includes(query.toLowerCase());
       const matchesPriority = priorityFilter === "All priorities" || (overrides[member.id]?.band ?? priority.band) === priorityFilter;
       const matchesProgram = programFilter === "All programs" || member.program === programFilter;
       const matchesTrigger = triggerFilter === "All triggers" || member.trigger === triggerFilter;
-      const matchesDeadline = deadlineFilter === "Any deadline" || (deadlineFilter === "Inside 24 hours" ? member.deadlineHours <= 24 : member.deadlineHours > 24);
-      const matchesUnreachable = !unreachableOnly || member.id === "P2" || member.id === "P3";
-      const matchesSaved = savedView === "Time-sensitive" ? member.deadlineHours <= 24 : savedView === "Needs verification" ? priority.verifyFirst : true;
+      const matchesDeadline = deadlineFilter === "Any deadline" || (deadlineFilter === "Inside 24 hours" ? facts.deadlineHours <= 24 : facts.deadlineHours > 24);
+      const matchesUnreachable = !unreachableOnly || facts.failedOutreachAttempts > 0;
+      const matchesSaved = savedView === "Time-sensitive" ? facts.deadlineHours <= 24 : savedView === "Needs verification" ? priority.verifyFirst : true;
       return matchesQuery && matchesPriority && matchesProgram && matchesTrigger && matchesDeadline && matchesUnreachable && matchesSaved;
     });
     return filtered.sort((a, b) => {
-      const aDeadline = a.deadlineHours <= 24 ? 0 : 1;
-      const bDeadline = b.deadlineHours <= 24 ? 0 : 1;
+      const aFacts = caseAssessments.get(a.id)!.facts;
+      const bFacts = caseAssessments.get(b.id)!.facts;
+      const aDeadline = aFacts.deadlineHours <= 24 ? 0 : 1;
+      const bDeadline = bFacts.deadlineHours <= 24 ? 0 : 1;
       if (aDeadline !== bDeadline) return aDeadline - bDeadline;
-      const scoreA = scorePriority(a.priorityFactors, "protocolTrigger" in a ? a.protocolTrigger : undefined, a.primaryActionId).score;
-      const scoreB = scorePriority(b.priorityFactors, "protocolTrigger" in b ? b.protocolTrigger : undefined, b.primaryActionId).score;
-      return sortBy === "Closest deadline" ? a.deadlineHours - b.deadlineHours : scoreB - scoreA;
+      const scoreA = caseAssessments.get(a.id)!.priority.score;
+      const scoreB = caseAssessments.get(b.id)!.priority.score;
+      return sortBy === "Closest deadline" ? aFacts.deadlineHours - bFacts.deadlineHours : scoreB - scoreA;
     });
-  }, [query, priorityFilter, programFilter, triggerFilter, deadlineFilter, unreachableOnly, sortBy, savedView, overrides]);
+  }, [query, priorityFilter, programFilter, triggerFilter, deadlineFilter, unreachableOnly, sortBy, savedView, overrides, caseAssessments]);
+  const firstDetailedCase = filteredCases.find((member) => member.isHero) ?? HERO_CASES[0];
 
   function saveOverride() {
     if (!overrideCase) return;
@@ -89,21 +98,21 @@ export default function QueuePage() {
       <PageHeader
         eyebrow="Monday, November 9 · Transitions of care"
         title="Good morning, Maria"
-        description="A prioritized view of the work that needs your attention. Scores and thresholds are illustrative and require clinical validation."
-        actions={<><button className="button button-secondary"><CalendarClock size={13} />Day plan · 6h 20m</button><Link className="button button-primary" href="/outreach/P1"><Sparkles size={13} />Start first case</Link></>}
+        description="A prioritized view of synthetic work items. Scores and thresholds are illustrative and require clinical validation."
+        actions={<><span className="button button-secondary"><CalendarClock size={13} />Review estimate · {Math.floor(metrics.estimatedReviewMinutes / 60)}h {metrics.estimatedReviewMinutes % 60}m</span><Link className="button button-primary" href={`/outreach/${firstDetailedCase.id}`}><Sparkles size={13} />Start first detailed case</Link></>}
       />
 
       <section className="stat-grid" aria-label="Today's work counts">
-        <Stat icon={<ArrowDownWideNarrow size={15} />} value="6" label="New discharges" />
-        <Stat icon={<CalendarClock size={15} />} value="12" label="Due today" />
-        <Stat icon={<Clock3 size={15} />} value="4" label="Overdue follow-ups" warning />
-        <Stat icon={<RotateCcw size={15} />} value="3" label="Unreachable" warning />
-        <Stat icon={<ShieldCheck size={15} />} value="2" label="Critical review" critical />
+        <Stat icon={<ArrowDownWideNarrow size={15} />} value={metrics.newDischarges} label="New discharges · 72h" />
+        <Stat icon={<CalendarClock size={15} />} value={metrics.dueToday} label="Due in 24h" />
+        <Stat icon={<Clock3 size={15} />} value={metrics.overdue} label="Overdue follow-ups" warning />
+        <Stat icon={<RotateCcw size={15} />} value={metrics.unreachable} label="Unreachable" warning />
+        <Stat icon={<ShieldCheck size={15} />} value={metrics.critical} label="Critical review" critical />
       </section>
 
       <div className="content-grid content-grid-2 section-spacer">
-        <div className="notice"><Timer size={15} /><span><strong>Day plan estimate: 6h 20m</strong><br />48 active cases · 6 new alerts · 11 tasks due before noon. Estimate is illustrative and based on configured task times.</span></div>
-        <div className="notice notice-warning"><Clock3 size={15} /><span><strong>Contact windows at risk</strong><br />Robert Delaney&apos;s transition contact target is inside 24 hours. Review the ADT alert and source dates before acting.</span></div>
+        <div className="notice"><Timer size={15} /><span><strong>Modeled review load: {Math.floor(metrics.estimatedReviewMinutes / 60)}h {metrics.estimatedReviewMinutes % 60}m</strong><br />{metrics.totalCases} cases · {metrics.newAlerts} alerts in the last 24 hours · {metrics.dueBeforeNoon} due within four hours. Estimate uses illustrative review times by priority band.</span></div>
+        <div className="notice notice-warning"><Clock3 size={15} /><span><strong>Review time-sensitive items</strong><br />The queue ranks cases using event, gap, confidence, and due-time facts. Verify source records before acting.</span></div>
       </div>
 
       <section className="card section-spacer">
@@ -111,9 +120,9 @@ export default function QueuePage() {
           <div><h2 className="section-title">Your work queue <span className="badge badge-neutral">{filteredCases.length} cases</span></h2><p className="section-description">Deadline cases are pinned, then ranked by the illustrative priority score.</p></div>
           <button className="button button-secondary" onClick={customView ? applyCustomView : saveCurrentView}><SlidersHorizontal size={13} />{customView ? "Apply saved view" : "Save current view"}</button>
         </div>
-        <div className="tabs-list" role="tablist" aria-label="Saved queue views">
-          {["All cases", "Time-sensitive", "Needs verification"].map((view) => <button key={view} className="tab-trigger" role="tab" aria-selected={savedView === view} onClick={() => setSavedView(view)}>{view}</button>)}
-          {customView && <button className="tab-trigger" role="tab" aria-selected={false} onClick={applyCustomView}>My saved view</button>}
+        <div className="tabs-list" role="group" aria-label="Saved queue filters">
+          {["All cases", "Time-sensitive", "Needs verification"].map((view) => <button key={view} className="tab-trigger" type="button" aria-pressed={savedView === view} onClick={() => setSavedView(view)}>{view}</button>)}
+          {customView && <button className="tab-trigger" type="button" aria-pressed="false" onClick={applyCustomView}>My saved view</button>}
         </div>
         <div className="content-grid content-grid-3 section-spacer">
           <label className="field"><span className="field-label">Search caseload</span><div style={{ position: "relative" }}><Search size={14} style={{ position: "absolute", top: 11, left: 10, color: "#7b8799" }} /><input className="input" style={{ paddingLeft: 31 }} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, ID or condition" /></div></label>
@@ -128,7 +137,7 @@ export default function QueuePage() {
         <div className="content-grid content-grid-3 section-spacer" style={{ marginTop: 10 }}>
           <label className="notice" style={{ alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={unreachableOnly} onChange={(event) => setUnreachableOnly(event.target.checked)} /><span>Show unreachable cases</span></label>
           <div className="notice" style={{ alignItems: "center" }}><Filter size={13} /><span>Deadline inside 24 hours stays pinned above the selected sort.</span></div>
-          <div className="notice notice-warning" style={{ alignItems: "center" }}><AlertTriangleIcon /><span>Verify first is a task flag, not a lower-priority band.</span></div>
+          <div className="notice notice-warning" style={{ alignItems: "center" }}><AlertTriangle size={14} /><span>Verify first is a task flag, not a lower-priority band.</span></div>
         </div>
 
         {filteredCases.length === 0 ?         <div className="section-spacer"><EmptyState title="No cases match these filters" description="Clear or change a filter to see cases in Maria's queue." action={<button className="button button-secondary" onClick={() => { setQuery(""); setPriorityFilter("All priorities"); setProgramFilter("All programs"); setTriggerFilter("All triggers"); setDeadlineFilter("Any deadline"); setUnreachableOnly(false); setSavedView("All cases"); }}>Clear filters</button>} /></div> : (
@@ -137,19 +146,27 @@ export default function QueuePage() {
               <thead><tr><th>Rank</th><th>Member</th><th>Priority</th><th>Why now</th><th>Next action</th><th>Confidence</th><th>Last contact</th><th aria-label="Expand row" /></tr></thead>
               <tbody>
                 {filteredCases.map((member, index) => {
-                  const result = scorePriority(member.priorityFactors, "protocolTrigger" in member ? member.protocolTrigger : undefined, member.primaryActionId);
+                  const result = caseAssessments.get(member.id)!.priority;
+                  const facts = caseAssessments.get(member.id)!.facts;
                   const band = (overrides[member.id]?.band as PriorityBand | undefined) ?? result.band;
                   const action = getActionRule(result.topActionId);
                   const expanded = expandedId === member.id;
                   return (
                     <FragmentRow key={member.id}>
                       <tr>
-                        <td><span className="table-rank">#{String(index + 1).padStart(2, "0")}</span>{member.deadlineHours <= 24 && <div className="member-meta" style={{ color: "#8c470f" }}>Due soon</div>}</td>
-                        <td><Link href={`/member/${member.id}`} className="member-name">{member.name}</Link><div className="member-meta">{member.age} · {member.plan} · {member.program}</div></td>
-                        <td><PriorityBadge band={band} /><div className="score-number">{result.score}<span style={{ fontSize: 9, color: "#728096" }}>/100</span></div><div className="score-meter"><div className="score-meter-fill" style={{ width: `${result.score}%` }} /></div>{overrides[member.id] && <div className="member-meta">Overridden</div>}</td>
-                        <td><div className="reason-text">{member.whyNow}</div><div className="member-meta">{member.trigger} · {member.triggerAgeHours >= 48 ? `${Math.floor(member.triggerAgeHours / 24)}d ago` : `${member.triggerAgeHours}h ago`} · {member.deadlineHours <= 24 ? `${member.deadlineHours}h to contact target` : `${member.deadlineHours}h window`}</div></td>
-                        <td><Link className="button button-primary" href={`/outreach/${member.id}`}><span>{action?.action ?? "Review case"}</span><ArrowUpRight size={12} /></Link><div className="member-meta">Rule {result.topActionId}</div>{result.verificationTaskId && <Link className="member-meta" style={{ display: "block", color: "#85420d" }} href={`/member/${member.id}`}>Verify first · Rule {result.verificationTaskId}</Link>}</td>
-                        <td><ConfidenceBadge score={member.priorityFactors.confidence} reasons={"confidenceNotes" in member ? member.confidenceNotes : ["Background case; verify source data before clinical action."]} />{result.verifyFirst && <div className="member-meta" style={{ color: "#85420d" }}>Verify first task</div>}</td>
+                        <td><span className="table-rank">#{String(index + 1).padStart(2, "0")}</span>{facts.deadlineHours <= 24 && <div className="member-meta" style={{ color: "#8c470f" }}>{facts.deadlineHours < 0 ? "Overdue" : "Due soon"}</div>}</td>
+                        <td>{member.isHero
+                          ? <Link href={`/member/${member.id}`} className="member-name">{member.name}</Link>
+                          : <button type="button" className="member-name case-link-button" onClick={() => setDetailCase(member)}>{member.name}</button>}
+                          <div className="member-meta">{member.age} · {member.plan} · {member.program}</div>
+                        </td>
+                        <td><PriorityBadge band={band} /><div className="score-number">{result.score}<span style={{ fontSize: 12, color: "#728096" }}>/100</span></div><div className="score-meter"><div className="score-meter-fill" style={{ width: `${result.score}%` }} /></div>{overrides[member.id] && <div className="member-meta">Overridden</div>}</td>
+                        <td><div className="reason-text">{result.whyNow}</div><div className="member-meta">{member.trigger} · {formatAge(facts.triggerAgeHours)} · {formatDeadline(facts.deadlineHours)}</div></td>
+                        <td>{member.isHero
+                          ? <Link className="button button-primary" href={`/outreach/${member.id}`}><span>{action?.action ?? "Review case"}</span><ArrowUpRight size={12} /></Link>
+                          : <button className="button button-primary" type="button" onClick={() => setDetailCase(member)}><span>{action?.action ?? "Review case"}</span><ArrowUpRight size={12} /></button>}
+                          <div className="member-meta">Rule {result.topActionId}</div>{result.verificationTaskId && <span className="member-meta" style={{ display: "block", color: "#85420d" }}>Verify first · Rule {result.verificationTaskId}</span>}</td>
+                        <td><ConfidenceBadge score={result.factors.confidence} reasons={"confidenceNotes" in member ? member.confidenceNotes : member.dataQualityFlags.length ? member.dataQualityFlags : ["Background case; verify source records before clinical action."]} />{result.verifyFirst && <div className="member-meta" style={{ color: "#85420d" }}>Verify first task</div>}</td>
                         <td><span>{member.lastContact}</span><div className="member-meta">{member.trigger}</div></td>
                         <td><button className="icon-button" aria-label={expanded ? `Collapse ${member.name}` : `Expand ${member.name}`} aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : member.id)}>{expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button></td>
                       </tr>
@@ -158,14 +175,14 @@ export default function QueuePage() {
                           {member.isHero && <button className="button button-secondary" onClick={() => { setOverrideCase(member); setOverrideReason(REASONS[0]); setOverrideBand((overrides[member.id]?.band as PriorityBand | undefined) ?? result.band); }}>Change priority</button>}
                         </div>
                         <div className="factor-grid">
-                          {Object.entries(member.priorityFactors).map(([factor, value]) => <div key={factor}><div className="factor-label">{factor === "events" ? "Recent events" : factor === "gaps" ? "Open gaps" : factor === "time" ? "Time sensitivity" : factor === "confidence" ? "Data confidence" : "Clinical urgency"} · {factor === "clinical" ? "35%" : factor === "events" ? "25%" : factor === "gaps" ? "20%" : factor === "time" ? "15%" : "5%"}</div><div className="factor-value">{value}/100</div></div>)}
+                          {Object.entries(result.factors).map(([factor, value]) => <div key={factor}><div className="factor-label">{factor === "events" ? "Recent events" : factor === "gaps" ? "Open gaps" : factor === "time" ? "Time sensitivity" : factor === "confidence" ? "Data confidence" : "Clinical urgency"} · {factor === "clinical" ? "35%" : factor === "events" ? "25%" : factor === "gaps" ? "20%" : factor === "time" ? "15%" : "5%"}</div><div className="factor-value">{value}/100</div></div>)}
                         </div>
                         {"protocolTrigger" in member && member.protocolTrigger && <div className="notice notice-danger section-spacer"><ShieldCheck size={14} /><span><strong>Protocol escalation</strong> · {member.protocolTrigger}</span></div>}
                         {result.verifyFirst && <div className="notice notice-warning section-spacer"><ShieldCheck size={14} /><span><strong>Verify first</strong> · Low data confidence adds a verification task and cannot make this case appear low priority.</span></div>}
-                        {"confidenceNotes" in member && <ul style={{ margin: "14px 0 0", paddingLeft: 17, color: "#53627a", fontSize: 10 }}>{member.confidenceNotes.map((note) => <li key={note} style={{ marginBottom: 4 }}>{note}</li>)}</ul>}
+                        {"confidenceNotes" in member && <ul style={{ margin: "14px 0 0", paddingLeft: 17, color: "#53627a", fontSize: 12 }}>{member.confidenceNotes.map((note) => <li key={note} style={{ marginBottom: 4 }}>{note}</li>)}</ul>}
                         {overrides[member.id] && <div className="callout section-spacer"><strong>Priority override</strong> · Original score {result.score} retained. {overrides[member.id].reason}</div>}
                         {auditEntries.filter((entry) => entry.patientId === member.id).map((entry) => <div className="member-meta section-spacer" key={entry.id}>Audit · {entry.kind} by {entry.by} at {entry.at}: {entry.detail}</div>)}
-                        {!member.isHero && <div className="member-meta section-spacer">Background case included to represent the 48-member caseload. Detailed records are available for the five scenario members.</div>}
+                        {!member.isHero && <div className="member-meta section-spacer">Lightweight synthetic case summary. This row can be reviewed here; a full Member 360 record is not supplied.</div>}
                       </div></td></tr>}
                     </FragmentRow>
                   );
@@ -185,7 +202,7 @@ export default function QueuePage() {
           <Dialog.Overlay className="overlay" />
           <Dialog.Content className="dialog" aria-describedby="override-description">
             <div className="section-header"><div><Dialog.Title className="dialog-title">Change priority</Dialog.Title><Dialog.Description id="override-description" className="dialog-description">The original score stays unchanged. Add a reason to create an audit entry.</Dialog.Description></div><Dialog.Close asChild><button className="icon-button" aria-label="Close dialog"><X size={15} /></button></Dialog.Close></div>
-            <div className="notice"><ShieldCheck size={14} /><span>{overrideCase?.name} · Current illustrative score {overrideCase ? scorePriority(overrideCase.priorityFactors, "protocolTrigger" in overrideCase ? overrideCase.protocolTrigger : undefined).score : ""}/100</span></div>
+            <div className="notice"><ShieldCheck size={14} /><span>{overrideCase?.name} · Current derived score {overrideCase ? scorePriority(overrideCase).score : ""}/100</span></div>
             <label className="field section-spacer"><span className="field-label">New priority band</span><select className="select" value={overrideBand} onChange={(event) => setOverrideBand(event.target.value as PriorityBand)}>{["Critical", "High", "Medium", "Low"].map((band) => <option key={band}>{band}</option>)}</select></label>
             <label className="field section-spacer"><span className="field-label">Reason</span><select className="select" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)}>{REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></label>
             <label className="field section-spacer"><span className="field-label">What changed?</span><textarea className="textarea" value={overrideNote} onChange={(event) => setOverrideNote(event.target.value)} placeholder="Add brief context for the audit log." /></label>
@@ -194,11 +211,33 @@ export default function QueuePage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <Dialog.Root open={Boolean(detailCase)} onOpenChange={(open) => { if (!open) setDetailCase(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="overlay" />
+          <Dialog.Content className="dialog" aria-describedby="case-detail-description">
+            {detailCase && (() => {
+              const details = caseAssessments.get(detailCase.id)!;
+              return <>
+                <div className="section-header"><div><Dialog.Title className="dialog-title">{detailCase.name} · {detailCase.id}</Dialog.Title><Dialog.Description id="case-detail-description" className="dialog-description">Lightweight synthetic queue record. No detailed clinical record is supplied for this case.</Dialog.Description></div><Dialog.Close asChild><button className="icon-button" aria-label="Close case details"><X size={15} /></button></Dialog.Close></div>
+                <div className="notice"><ShieldCheck size={14} /><span><strong>{detailCase.program}</strong><br />{detailCase.primaryCondition} · {detailCase.plan} · age {detailCase.age}</span></div>
+                <div className="fact-row"><span className="fact-label">Trigger</span><span className="fact-value">{detailCase.trigger}</span></div>
+                <div className="fact-row"><span className="fact-label">Next action</span><span className="fact-value">{getActionRule(details.priority.topActionId)?.action}</span></div>
+                <div className="fact-row"><span className="fact-label">Why now</span><span className="fact-value">{details.priority.whyNow}</span></div>
+                <div className="fact-row"><span className="fact-label">Trigger age</span><span className="fact-value">{formatAge(details.facts.triggerAgeHours)}</span></div>
+                <div className="fact-row"><span className="fact-label">Contact target</span><span className="fact-value">{formatDeadline(details.facts.deadlineHours)}</span></div>
+                <div className="fact-row"><span className="fact-label">Recorded open gaps</span><span className="fact-value">{"riskSignals" in detailCase ? detailCase.riskSignals.length : detailCase.attention.length}</span></div>
+                <div className="fact-row"><span className="fact-label">Recorded failed attempts</span><span className="fact-value">{"failedAttemptCount" in detailCase ? detailCase.failedAttemptCount : detailCase.contacts.filter((entry) => ["No answer", "Voicemail", "Disconnected", "Wrong number"].includes(entry.outcome)).length}</span></div>
+                <div className="notice notice-warning section-spacer"><span>Confirm identity, current facts, contact permission, and source availability before any action. This record is a queue summary, not a patient chart.</span></div>
+              </>;
+            })()}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </main>
   );
 }
 
-function Stat({ icon, value, label, warning, critical }: { icon: React.ReactNode; value: string; label: string; warning?: boolean; critical?: boolean }) {
+function Stat({ icon, value, label, warning, critical }: { icon: React.ReactNode; value: string | number; label: string; warning?: boolean; critical?: boolean }) {
   return <div className="stat-card"><div className={`stat-icon ${critical ? "stat-icon-critical" : warning ? "stat-icon-warning" : ""}`}>{icon}</div><div><div className="stat-value">{value}</div><div className="stat-label">{label}</div></div></div>;
 }
 
@@ -206,6 +245,12 @@ function FragmentRow({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function AlertTriangleIcon() {
-  return <ShieldCheck size={14} aria-hidden="true" />;
+function formatAge(hours: number) {
+  return hours < 24 ? `${Math.floor(hours)}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatDeadline(hours: number) {
+  if (hours < 0) return `${Math.abs(Math.floor(hours))}h overdue`;
+  if (hours < 24) return `Due in ${Math.floor(hours)}h`;
+  return `Due in ${Math.floor(hours / 24)}d`;
 }

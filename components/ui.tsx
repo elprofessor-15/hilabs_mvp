@@ -1,7 +1,7 @@
 "use client";
 
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { AlertCircle, CheckCircle2, Clock3, Info, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, Info, ShieldAlert } from "lucide-react";
 import type { DatasetId, PriorityBand } from "@/lib/types";
 import { getFreshness } from "@/lib/engines";
 import { SCENARIO_NOW } from "@/config/workbench";
@@ -49,7 +49,7 @@ export function ProvenanceChip({ source, eventDate, receivedDate, datasetId, qua
           </button>
         </Tooltip.Trigger>
         <Tooltip.Portal>
-          <Tooltip.Content sideOffset={6} style={{ maxWidth: 280, padding: "10px 12px", borderRadius: 8, color: "#fff", background: "#031335", fontSize: 10, lineHeight: 1.55, zIndex: 80 }}>
+          <Tooltip.Content sideOffset={6} style={{ maxWidth: 280, padding: "10px 12px", borderRadius: 8, color: "#fff", background: "#031335", fontSize: 12, lineHeight: 1.55, zIndex: 80 }}>
             <strong>Source:</strong> {source}<br />
             <strong>Event date:</strong> {eventDate}<br />
             <strong>Received date:</strong> {receivedDate}<br />
@@ -74,7 +74,7 @@ export function ConfidenceBadge({ score, reasons }: { score: number; reasons: st
           </button>
         </Tooltip.Trigger>
         <Tooltip.Portal>
-          <Tooltip.Content sideOffset={6} style={{ maxWidth: 290, padding: "10px 12px", borderRadius: 8, color: "#fff", background: "#031335", fontSize: 10, lineHeight: 1.55, zIndex: 80 }}>
+          <Tooltip.Content sideOffset={6} style={{ maxWidth: 290, padding: "10px 12px", borderRadius: 8, color: "#fff", background: "#031335", fontSize: 12, lineHeight: 1.55, zIndex: 80 }}>
             Confidence reflects source quality flags, not clinical certainty.
             {reasons.map((reason) => <div key={reason}>• {reason}</div>)}
             <Tooltip.Arrow style={{ fill: "#031335" }} />
@@ -85,8 +85,8 @@ export function ConfidenceBadge({ score, reasons }: { score: number; reasons: st
   );
 }
 
-export function AiBadge() {
-  return <span className="badge badge-ai"><Sparkles size={11} />AI draft · review required</span>;
+export function RecordDraftBadge() {
+  return <span className="badge badge-blue">Record-derived draft · review required</span>;
 }
 
 export function EmptyState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {

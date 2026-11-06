@@ -8,8 +8,10 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { HERO_CASES } from "@/data/seed";
+import { BACKGROUND_CASES, HERO_CASES } from "@/data/seed";
 import { SCENARIO_LABEL } from "@/config/workbench";
+import { getQueueMetrics } from "@/lib/engines";
+import { useWorkbenchStore } from "@/lib/store";
 
 const navigation = [
   { href: "/queue", label: "Work Queue", icon: LayoutDashboard },
@@ -27,6 +29,7 @@ const tourSteps = [
   { title: "3. Use a different outreach route", route: "/outreach/P3", member: "P3", body: "After repeated failed attempts, use a documented partner route rather than repeating an unverified call." },
   { title: "4. Review the safety workflow", route: "/member/P4", member: "P4", body: "An unreviewed safety screening item is escalated for licensed clinician review. The prototype does not assess risk." },
 ];
+const queueMetrics = getQueueMetrics([...HERO_CASES, ...BACKGROUND_CASES]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -36,6 +39,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIndex, setTourIndex] = useState(0);
   const [query, setQuery] = useState("");
+  const [storageWarning, setStorageWarning] = useState(false);
+
+  useEffect(() => {
+    const handleStorageError = () => setStorageWarning(true);
+    window.addEventListener("workbench:storage-error", handleStorageError);
+    void useWorkbenchStore.persist.rehydrate();
+    return () => window.removeEventListener("workbench:storage-error", handleStorageError);
+  }, []);
 
   useEffect(() => {
     setClean(new URLSearchParams(window.location.search).get("clean") === "1");
@@ -77,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             return (
               <Link key={href} href={href} className={`nav-link ${active ? "nav-link-active" : ""}`} aria-label={label} aria-current={active ? "page" : undefined} title={label}>
                 <Icon size={16} aria-hidden="true" /><span>{label}</span>
-                {label === "Work Queue" && <span className="nav-count">6</span>}
+                {label === "Work Queue" && <span className="nav-count">{queueMetrics.dueToday}</span>}
               </Link>
             );
           })}
@@ -95,12 +106,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button className="topbar-search" onClick={() => setSearchOpen(true)} aria-label="Search members, open command palette">
             <Search size={15} /><span className="search-placeholder">Search members or open a view</span><kbd className="kbd">⌘ K</kbd>
           </button>
-          <span className="caseload-chip"><ListChecks size={14} /><span>48 active · 6 new</span></span>
+          <span className="caseload-chip"><ListChecks size={14} /><span>{queueMetrics.totalCases} active · {queueMetrics.newAlerts} new</span></span>
           <button className="topbar-action" onClick={() => { setTourIndex(0); setTourOpen(true); }} aria-label="Start guided walkthrough">
             <Sparkles size={14} /><span>Walkthrough</span>
           </button>
         </header>
         {!clean && <div className="synthetic-banner"><ShieldCheck size={12} /> Synthetic data. No real PHI.</div>}
+        {storageWarning && <div className="synthetic-banner storage-warning" role="alert">Session storage is unavailable. Changes remain in this tab and may not survive a reload.</div>}
         {children}
       </div>
 

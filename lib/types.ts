@@ -50,6 +50,16 @@ export interface DatasetRecord {
   qualityFlags: string[];
   summary: string;
   plantedImperfection: string;
+  recordId?: string;
+  claimId?: string;
+  diagnosisCode?: string;
+  medicationCode?: string;
+  value?: number;
+  unit?: string;
+  quantity?: number;
+  daysSupply?: number;
+  status?: string;
+  observations?: { name: string; value: number; unit: string; referenceRange?: string }[];
 }
 
 export interface TimelineEvent {
@@ -97,18 +107,14 @@ export interface WorkCase {
   phone: string;
   alternatePhone?: string;
   address: string;
-  priorityFactors: PriorityFactors;
   protocolTrigger?: string;
   lastContact: string;
   trigger: string;
-  triggerDate: string;
-  triggerAgeHours: number;
-  deadlineHours: number;
-  primaryActionId: string;
-  whyNow: string;
+  triggerAt: string;
+  contactDueAt: string;
   morningBrief: string;
   confidenceNotes: string[];
-  attention: { label: string; severity: "Critical" | "High" | "Medium"; evidence: string; actionId: string }[];
+  attention: { label: string; severity: "Critical" | "High" | "Medium"; evidence: string }[];
   events: TimelineEvent[];
   medications: MedicationSource[];
   contacts: ContactEntry[];
@@ -123,18 +129,43 @@ export interface BackgroundCase {
   plan: string;
   program: string;
   primaryCondition: string;
-  priorityFactors: PriorityFactors;
   lastContact: string;
   trigger: string;
-  triggerDate: string;
-  triggerAgeHours: number;
-  deadlineHours: number;
-  primaryActionId: string;
-  whyNow: string;
+  triggerAt: string;
+  contactDueAt: string;
+  riskSignals: { label: string; severity: "Critical" | "High" | "Medium" }[];
+  dataQualityFlags: string[];
+  failedAttemptCount: number;
   isHero: false;
 }
 
 export type QueueCase = WorkCase | BackgroundCase;
+
+export interface CaseFacts {
+  caseId: string;
+  program: string;
+  triggerAgeHours: number;
+  deadlineHours: number;
+  protocolEscalation: boolean;
+  recentDischargeWithoutContact: boolean;
+  medicationFillGapDays: number;
+  failedOutreachAttempts: number;
+  pendingAuthorizationDays: number;
+  medicationConflict: boolean;
+  followUpNotFound: boolean;
+  invalidPhoneRecorded: boolean;
+  transportBarrier: boolean;
+  caregiverStrain: boolean;
+  claimsDelayed: boolean;
+  staleClinicalFact: boolean;
+  missedAppointment: boolean;
+  confidenceScore: number;
+  criticalGapCount: number;
+  highGapCount: number;
+  mediumGapCount: number;
+  recentEventCount: number;
+  dataQualityIssueCount: number;
+}
 
 export interface PriorityResult {
   score: number;
@@ -143,4 +174,7 @@ export interface PriorityResult {
   verificationTaskId?: string;
   protocolEscalation: boolean;
   topActionId: string;
+  factors: PriorityFactors;
+  whyNow: string;
+  matchingActionIds: string[];
 }

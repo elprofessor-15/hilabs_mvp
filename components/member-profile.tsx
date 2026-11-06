@@ -6,11 +6,11 @@ import {
   ClipboardList, FileQuestion, Phone, ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { DATASETS } from "@/data/datasets";
 import { HERO_CASES } from "@/data/seed";
 import { SCENARIO_NOW } from "@/config/workbench";
-import { calculateFillGap, getActionRule, getFreshness, scorePriority } from "@/lib/engines";
+import { calculateFillGap, deriveCaseFacts, getActionRule, getDatasetConfidence, getFreshness, scorePriority } from "@/lib/engines";
 import { useWorkbenchStore } from "@/lib/store";
 import { formatDate } from "@/lib/utils";
 import type { DatasetId, WorkCase } from "@/lib/types";
@@ -30,14 +30,14 @@ function MemberDetails({ member }: { member: WorkCase }) {
   const [conflictNote, setConflictNote] = useState("");
   const conflict = useWorkbenchStore((state) => state.conflictDecisions[member.id]);
   const decideConflict = useWorkbenchStore((state) => state.decideConflict);
-  const result = scorePriority(member.priorityFactors, member.protocolTrigger, member.primaryActionId);
-  const confidence = { score: member.priorityFactors.confidence, reasons: member.confidenceNotes };
-  const medicationConflict = member.medications.length > 1 && (member.id === "P1" || member.id === "P5");
+  const result = scorePriority(member);
+  const confidence = getDatasetConfidence(member.dataRecords);
+  const medicationConflict = member.medications.some((item) => item.qualityFlags.some((flag) => /conflict|duplicate/i.test(flag)));
   const fillGaps = member.medications.filter((item) => item.daysSupply !== undefined).map((item) => ({
     medication: item.medication,
     gapDays: calculateFillGap(item.eventDate, item.daysSupply ?? 0, SCENARIO_NOW),
   }));
-  const actionItems = useMemo(() => member.attention.slice(0, 3), [member]);
+  const actionItems = result.matchingActionIds.slice(0, 3).map(getActionRule).filter((rule) => rule !== undefined);
 
   function recordConflict(decision: string) {
     if (conflictNote.trim().length < 8) return;
@@ -71,7 +71,7 @@ function MemberDetails({ member }: { member: WorkCase }) {
           </div>
           <div>
             <div className="section-header"><div><h2 className="section-title">Priority and next step</h2><p className="section-description">Rule-based and auditable. Not an autonomous clinical recommendation.</p></div><PriorityBadge band={result.band} /></div>
-            <div className="notice"><CircleHelp size={15} /><span><strong>Why now</strong><br />{member.whyNow}</span></div>
+            <div className="notice"><CircleHelp size={15} /><span><strong>Why now</strong><br />{result.whyNow}</span></div>
             {result.verifyFirst && <div className="notice notice-warning section-spacer"><ShieldAlert size={14} /><span><strong>Verify first</strong> · Data confidence is low. A verification task is added and the case cannot be ranked as low priority because of missing data.</span></div>}
             <div className="notice section-spacer"><ClipboardList size={15} /><span><strong>Top action · Rule {result.topActionId}</strong><br />{getActionRule(result.topActionId)?.action}<EvidenceChips member={member} actionId={result.topActionId} /></span></div>
             <div className="member-meta section-spacer">Score {result.score}/100 · weights are illustrative and require clinical validation.</div>
@@ -103,10 +103,9 @@ function MemberDetails({ member }: { member: WorkCase }) {
           <div className="section-header"><div><h2 className="section-title">Needs attention</h2><p className="section-description">Evidence and a review action for each item.</p></div><AlertCircle size={16} color="#5A6884" /></div>
           <div style={{ display: "grid", gap: 9 }}>
             {member.attention.map((item) => {
-              const action = getActionRule(item.actionId);
               return <div key={item.label} className={`notice ${item.severity === "Critical" ? "notice-danger" : item.severity === "High" ? "notice-warning" : ""}`}>
                 <AlertCircle size={14} />
-                <div style={{ flex: 1 }}><div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}><strong>{item.label}</strong><PriorityBadge band={item.severity} /></div><div style={{ marginTop: 4 }}>{item.evidence}</div>                <div className="member-meta">Suggested review · Rule {item.actionId}: {action?.action}</div><EvidenceChips member={member} actionId={item.actionId} /></div>
+                <div style={{ flex: 1 }}><div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}><strong>{item.label}</strong><PriorityBadge band={item.severity} /></div><div style={{ marginTop: 4 }}>{item.evidence}</div></div>
               </div>;
             })}
           </div>
@@ -115,8 +114,7 @@ function MemberDetails({ member }: { member: WorkCase }) {
           <div className="section-header"><div><h2 className="section-title">Next best actions</h2><p className="section-description">Transparent rules, with evidence links and owner.</p></div><CalendarCheck size={16} color="#5A6884" /></div>
           <div style={{ display: "grid", gap: 8 }}>
             {actionItems.map((item, index) => {
-              const action = getActionRule(item.actionId);
-              return <div className="fact-row" key={item.actionId}><div style={{ minWidth: 0 }}><div className="member-name">0{index + 1} · {action?.action}</div><div className="member-meta">Rule {item.actionId} · Owner: Maria Chen, RN</div><div className="member-meta">{action?.rationale}</div><EvidenceChips member={member} actionId={item.actionId} /></div><span className="badge badge-neutral">Today</span></div>;
+              return <div className="fact-row" key={item.id}><div style={{ minWidth: 0 }}><div className="member-name">0{index + 1} · {item.action}</div><div className="member-meta">Rule {item.id} · Owner: Maria Chen, RN</div><div className="member-meta">{item.rationale}</div><EvidenceChips member={member} actionId={item.id} /></div><span className="badge badge-neutral">Rule matched</span></div>;
             })}
           </div>
           <Link className="button button-secondary section-spacer" href={`/outreach/${member.id}`}>Open outreach planner <ArrowRight size={13} /></Link>
@@ -170,8 +168,9 @@ function EvidenceChips({ member, actionId }: { member: WorkCase; actionId: strin
 }
 
 function OverviewPanel({ member }: { member: WorkCase }) {
+  const facts = deriveCaseFacts(member);
   return <div className="content-grid content-grid-2">
-    <div><h3 className="section-title">Case snapshot</h3><div className="fact-row"><span className="fact-label">Trigger</span><span className="fact-value">{member.trigger} · {formatDate(member.triggerDate)}</span></div><div className="fact-row"><span className="fact-label">Contact target</span><span className="fact-value">{member.deadlineHours <= 24 ? `${member.deadlineHours} hours remaining` : "Review today"}</span></div><div className="fact-row"><span className="fact-label">Last contact</span><span className="fact-value">{member.lastContact}</span></div><div className="fact-row"><span className="fact-label">Care team</span><span className="fact-value">{member.pcp}</span></div></div>
+    <div><h3 className="section-title">Case snapshot</h3><div className="fact-row"><span className="fact-label">Trigger</span><span className="fact-value">{member.trigger} · {formatDate(member.triggerAt)}</span></div><div className="fact-row"><span className="fact-label">Contact target</span><span className="fact-value">{facts.deadlineHours < 0 ? `${Math.abs(Math.floor(facts.deadlineHours))} hours overdue` : `${Math.floor(facts.deadlineHours)} hours remaining`}</span></div><div className="fact-row"><span className="fact-label">Last contact</span><span className="fact-value">{member.lastContact}</span></div><div className="fact-row"><span className="fact-label">Care team</span><span className="fact-value">{member.pcp}</span></div></div>
     <div><h3 className="section-title">Source confidence</h3><p className="section-description">Confidence is based on visible quality flags, not clinical certainty.</p>{member.confidenceNotes.map((note) => <div className="fact-row" key={note}><span className="fact-label">{note}</span><FileQuestion size={13} color="#8c98b0" /></div>)}</div>
   </div>;
 }
@@ -201,15 +200,18 @@ function MedicationPanel({ member, fillGaps, conflict, note, setNote, onDecision
 function RecordPanel({ member, datasets }: { member: WorkCase; datasets: DatasetId[] }) {
   const rows = member.dataRecords.filter((record) => datasets.includes(record.datasetId));
   if (!rows.length) return <EmptyState title="No records in this view" description="The source did not provide a record. Confirm with the member or provider before interpreting this as a negative finding." />;
-  return <div className="table-wrap"><table className="data-table"><thead><tr><th>Dataset</th><th>Source</th><th>Summary</th><th>Event date</th><th>Received date</th><th>Freshness</th><th>Quality</th></tr></thead><tbody>{rows.map((row, index) => {
+  return <div className="table-wrap"><table className="data-table"><thead><tr><th>Dataset</th><th>Source</th><th>Record and codes</th><th>Summary and values</th><th>Event date</th><th>Received date</th><th>Freshness</th><th>Quality</th><th>Planted imperfection</th></tr></thead><tbody>{rows.map((row, index) => {
     const definition = DATASETS.find((dataset) => dataset.id === row.datasetId);
     const freshness = getFreshness(row.eventDate, row.datasetId, SCENARIO_NOW);
-    return <tr key={`${row.datasetId}-${index}`}><td>{definition?.name ?? row.datasetId}</td><td>{row.source}</td><td>{row.summary}</td><td>{formatDate(row.eventDate)}</td><td>{formatDate(row.receivedDate)}</td><td><span className={`badge badge-${freshness.state.toLowerCase()}`}>{freshness.state} · {freshness.ageDays}d</span></td><td>{row.qualityFlags.join("; ") || "No flags"}</td></tr>;
+    const observations = row.observations?.map((result) => `${result.name}: ${result.value} ${result.unit}${result.referenceRange ? ` (reference ${result.referenceRange})` : ""}`).join("; ");
+    const codes = [row.claimId && `Claim ${row.claimId}`, row.diagnosisCode && `ICD-10 ${row.diagnosisCode}`, row.medicationCode && `NDC ${row.medicationCode}`].filter(Boolean).join(" · ");
+    return <tr key={`${row.datasetId}-${index}`}><td>{definition?.name ?? row.datasetId}</td><td>{row.source}</td><td>{row.recordId}{codes && <div className="member-meta">{codes}</div>}{row.status && <div className="member-meta">Status · {row.status}</div>}</td><td>{row.summary}{observations && <div className="member-meta">{observations}</div>}{row.quantity !== undefined && <div className="member-meta">Quantity {row.quantity} · {row.daysSupply ?? "not recorded"} days supply</div>}</td><td>{formatDate(row.eventDate)}</td><td>{formatDate(row.receivedDate)}</td><td><span className={`badge badge-${freshness.state.toLowerCase()}`}>{freshness.state} · {freshness.ageDays}d</span></td><td>{row.qualityFlags.join("; ") || "No flags"}</td><td>{row.plantedImperfection || "None recorded"}</td></tr>;
   })}</tbody></table></div>;
 }
 
 function CarePlanPanel({ member }: { member: WorkCase }) {
-  return <div className="content-grid content-grid-2"><div><h3 className="section-title">Goals to confirm</h3>{member.attention.slice(0, 3).map((item) => <div className="fact-row" key={item.label}><span>{item.label}</span><span className="badge badge-neutral">Needs nurse review</span></div>)}</div><div><h3 className="section-title">Missing information</h3><div className="notice notice-warning section-spacer"><FileQuestion size={14} /><span>{member.id === "P1" ? "No discharge summary received. Requested Nov 8." : "No current care-plan update found in the synthetic records. Confirm with the member before documenting."}</span></div></div></div>;
+  const missingRecords = member.dataRecords.filter((record) => record.qualityFlags.some((flag) => /missing|not received|not supplied/i.test(flag)));
+  return <div className="content-grid content-grid-2"><div><h3 className="section-title">Goals to confirm</h3>{member.attention.slice(0, 3).map((item) => <div className="fact-row" key={item.label}><span>{item.label}</span><span className="badge badge-neutral">Needs nurse review</span></div>)}</div><div><h3 className="section-title">Missing or incomplete source information</h3>{missingRecords.length ? missingRecords.map((record) => <div className="notice notice-warning section-spacer" key={record.recordId}><FileQuestion size={14} /><span>{record.source} · {record.qualityFlags.join("; ")} · event {formatDate(record.eventDate)}. Confirm with the source or member; missing information is not a negative finding.</span></div>) : <div className="notice section-spacer"><FileQuestion size={14} /><span>No source record is explicitly flagged as missing in this view. Confirm care-plan completeness before documenting.</span></div>}</div></div>;
 }
 
 function ContactPanel({ member }: { member: WorkCase }) {
